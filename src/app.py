@@ -12,73 +12,97 @@ A robust SaaS tool blending a Prop Firm Performance Auditor with an MQL5 Strateg
 
 col1, col2 = st.columns(2)
 with col1:
-    backtest_file = st.file_uploader("Upload Backtest CSV", type=["csv"])
+    backtest_file = st.file_uploader("Upload Backtest CSV (Optional)", type=["csv"])
 with col2:
-    live_file = st.file_uploader("Upload Live CSV", type=["csv"])
+    live_file = st.file_uploader("Upload Live CSV (Optional)", type=["csv"])
 
-if backtest_file and live_file:
-    df_bt = pd.read_csv(backtest_file)
-    df_live = pd.read_csv(live_file)
+# Determine if we have any data to analyze
+has_backtest = backtest_file is not None
+has_live = live_file is not None
 
-    if 'PnL' not in df_bt.columns or 'PnL' not in df_live.columns:
-        st.error("Error: CSVs must contain a 'PnL' column.")
+if has_backtest or has_live:
+    df_bt = pd.read_csv(backtest_file) if has_backtest else None
+    df_live = pd.read_csv(live_file) if has_live else None
+
+    # Validation check
+    valid_bt = df_bt is not None and 'PnL' in df_bt.columns
+    valid_live = df_live is not None and 'PnL' in df_live.columns
+
+    if (has_backtest and not valid_bt) or (has_live and not valid_live):
+        st.error("Error: Uploaded CSVs must contain a 'PnL' column. Please use the MQL5 DataExtractor script.")
     else:
         tab1, tab2, tab3 = st.tabs(["Integrity Score", "BI & Regime Analysis", "Prop-Firm Monte Carlo"])
 
+        # Determine the primary dataframe for Regime and Monte Carlo analysis
+        # If both are uploaded, let the user choose which one to analyze for Tabs 2 & 3.
+        # Otherwise, default to the one that is uploaded.
+        if has_backtest and has_live:
+            st.sidebar.markdown("### Analysis Data Source")
+            analysis_source = st.sidebar.radio(
+                "Select which dataset to use for Regime Analysis and Monte Carlo:",
+                ("Live Data", "Backtest Data")
+            )
+            df_analysis = df_live.copy() if analysis_source == "Live Data" else df_bt.copy()
+            st.sidebar.info(f"Currently analyzing: **{analysis_source}**")
+        else:
+            df_analysis = df_live.copy() if has_live else df_bt.copy()
+            source_name = "Live Data" if has_live else "Backtest Data"
+            st.sidebar.info(f"Currently analyzing: **{source_name}**")
+
         # --- TAB 1: INTEGRITY SCORE ---
         with tab1:
-            results = calculate_integrity_score(df_bt, df_live)
-
-            st.subheader("Integrity Score")
-            score = results['IntegrityScore']
-
-            fig = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = score,
-                domain = {'x': [0, 1], 'y': [0, 1]},
-                title = {'text': "Strategy Integrity Score"},
-                gauge = {
-                    'axis': {'range': [None, 100]},
-                    'bar': {'color': "darkblue"},
-                    'steps': [
-                        {'range': [0, 50], 'color': "red"},
-                        {'range': [50, 80], 'color': "yellow"},
-                        {'range': [80, 100], 'color': "green"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "white", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 80
-                    }
-                }
-            ))
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.subheader("Score Components")
-            c1, c2, c3 = st.columns(3)
-            c1.metric(label="Profit Factor Retention", value=f"{results['Components']['R_PF']*100:.1f}%")
-            c2.metric(label="Drawdown Penalty", value=f"{results['Components']['P_DD']*100:.1f}%")
-            c3.metric(label="Expectancy Match", value=f"{results['Components']['M_E']*100:.1f}%")
-
-            st.subheader("Advanced DNA Z-Score Check")
-            z_col1, z_col2 = st.columns(2)
-            z_col1.metric(label="Z-Score", value=f"{results['ZScore']:.2f}")
-            z_col2.metric(label="DNA Status", value=results['DNA_Status'])
-
-            if results['ZScore'] < -2.0:
-                st.warning("The live strategy is performing significantly worse than the backtest. The backtest is likely curve-fitted.")
-            elif -1.96 <= results['ZScore'] <= 1.96:
-                st.success("The live results match the backtest DNA (95% confidence).")
+            if not (has_backtest and has_live):
+                st.info("ℹ️ **Integrity Score Requires Both Files.** Please upload both a Backtest CSV and a Live CSV to calculate the statistical degradation and curve-fitting score.")
             else:
-                st.info("The live strategy is overperforming expectations in an anomalous way. The backtest edge may not map 1:1.")
+                results = calculate_integrity_score(df_bt, df_live)
+
+                st.subheader("Integrity Score")
+                score = results['IntegrityScore']
+
+                fig = go.Figure(go.Indicator(
+                    mode = "gauge+number",
+                    value = score,
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Strategy Integrity Score"},
+                    gauge = {
+                        'axis': {'range': [None, 100]},
+                        'bar': {'color': "darkblue"},
+                        'steps': [
+                            {'range': [0, 50], 'color': "red"},
+                            {'range': [50, 80], 'color': "yellow"},
+                            {'range': [80, 100], 'color': "green"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "white", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 80
+                        }
+                    }
+                ))
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Score Components")
+                c1, c2, c3 = st.columns(3)
+                c1.metric(label="Profit Factor Retention", value=f"{results['Components']['R_PF']*100:.1f}%")
+                c2.metric(label="Drawdown Penalty", value=f"{results['Components']['P_DD']*100:.1f}%")
+                c3.metric(label="Expectancy Match", value=f"{results['Components']['M_E']*100:.1f}%")
+
+                st.subheader("Advanced DNA Z-Score Check")
+                z_col1, z_col2 = st.columns(2)
+                z_col1.metric(label="Z-Score", value=f"{results['ZScore']:.2f}")
+                z_col2.metric(label="DNA Status", value=results['DNA_Status'])
+
+                if results['ZScore'] < -2.0:
+                    st.warning("The live strategy is performing significantly worse than the backtest. The backtest is likely curve-fitted.")
+                elif -1.96 <= results['ZScore'] <= 1.96:
+                    st.success("The live results match the backtest DNA (95% confidence).")
+                else:
+                    st.info("The live strategy is overperforming expectations in an anomalous way. The backtest edge may not map 1:1.")
 
         # --- TAB 2: BI & REGIME ANALYSIS ---
         with tab2:
-            st.header("Live Regime Analysis")
-            st.markdown("Breakdown of live trading performance based on volatility regimes and execution session.")
-
-            # Use Live Data for analysis
-            df_analysis = df_live.copy()
+            st.header("Regime Analysis")
+            st.markdown("Breakdown of trading performance based on volatility regimes and execution session.")
 
             st.subheader("Market Regime Analysis (Terciles)")
             regime_indicator = st.selectbox("Select Volatility Indicator:", ["ATR", "StdDev"])
@@ -133,7 +157,7 @@ if backtest_file and live_file:
         # --- TAB 3: PROP-FIRM MONTE CARLO ---
         with tab3:
             st.header("Prop-Firm Monte Carlo Simulator")
-            st.markdown("Stress-test the live trade history against standard Prop Firm rules using bootstrapping.")
+            st.markdown("Stress-test the trade history against standard Prop Firm rules using bootstrapping.")
 
             col_mc1, col_mc2 = st.columns([1, 2])
             with col_mc1:
@@ -150,7 +174,7 @@ if backtest_file and live_file:
                 if run_btn:
                     with st.spinner("Running Monte Carlo bootstrapping..."):
                         mc_results = run_prop_firm_monte_carlo(
-                            df_live, starting_balance, daily_dd_pct, total_dd_pct, target_pct, sims
+                            df_analysis, starting_balance, daily_dd_pct, total_dd_pct, target_pct, sims
                         )
 
                         if 'error' in mc_results:

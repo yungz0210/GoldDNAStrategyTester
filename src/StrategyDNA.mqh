@@ -4,15 +4,80 @@
 //+------------------------------------------------------------------+
 #property copyright "Strategy DNA Tester"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
+
+//+------------------------------------------------------------------+
+//| Helper Function: Calculate ATR manually at a specific time       |
+//+------------------------------------------------------------------+
+double CalculateATR(string symbol, ENUM_TIMEFRAMES timeframe, datetime entry_time, int period)
+  {
+   // Find the shift for the given entry time
+   int shift = iBarShift(symbol, timeframe, entry_time);
+   if(shift < 0) return 0.0;
+
+   // We need to calculate True Range for 'period' bars prior to the entry shift
+   // True Range requires the High, Low, and Previous Close.
+   // So we need 'period' + 1 bars.
+   double high[], low[], close[];
+   int copied_h = CopyHigh(symbol, timeframe, shift, period + 1, high);
+   int copied_l = CopyLow(symbol, timeframe, shift, period + 1, low);
+   int copied_c = CopyClose(symbol, timeframe, shift, period + 1, close);
+
+   if(copied_h < period + 1 || copied_l < period + 1 || copied_c < period + 1)
+      return 0.0;
+
+   double sum_tr = 0.0;
+
+   // Loop through the 'period' bars (skipping index 0 which is just the "previous close" of the oldest bar)
+   // Arrays from Copy... are oldest first (index 0) to newest last (index 'period')
+   for(int i = 1; i <= period; i++)
+     {
+      double h = high[i];
+      double l = low[i];
+      double prev_c = close[i-1];
+
+      double tr = MathMax(h - l, MathMax(MathAbs(h - prev_c), MathAbs(l - prev_c)));
+      sum_tr += tr;
+     }
+
+   return sum_tr / period;
+  }
+
+//+------------------------------------------------------------------+
+//| Helper Function: Calculate StdDev manually at a specific time    |
+//+------------------------------------------------------------------+
+double CalculateStdDev(string symbol, ENUM_TIMEFRAMES timeframe, datetime entry_time, int period)
+  {
+   // Find the shift for the given entry time
+   int shift = iBarShift(symbol, timeframe, entry_time);
+   if(shift < 0) return 0.0;
+
+   double close[];
+   int copied_c = CopyClose(symbol, timeframe, shift, period, close);
+
+   if(copied_c < period)
+      return 0.0;
+
+   double sum = 0.0;
+   for(int i = 0; i < period; i++) sum += close[i];
+
+   double sma = sum / period;
+
+   double sum_sq_diff = 0.0;
+   for(int i = 0; i < period; i++)
+     {
+      double diff = close[i] - sma;
+      sum_sq_diff += diff * diff;
+     }
+
+   return MathSqrt(sum_sq_diff / period);
+  }
 
 //+------------------------------------------------------------------+
 //| Call this function inside your Expert Advisor's OnDeinit()       |
 //+------------------------------------------------------------------+
 void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14, int StdDev_Period=20)
   {
-   // In the Strategy Tester, files are saved to Tester/Files/
-   // On a live chart, files are saved to MQL5/Files/
    int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
    if(file_handle == INVALID_HANDLE)
      {
@@ -20,11 +85,9 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
       return;
      }
 
-   // Write header row
    string header = "Ticket,Symbol,Type,EntryTime,ExitTime,DurationSec,EntryPrice,ExitPrice,Volume,MAE,MFE,Commission,Swap,PnL,ATR,StdDev,EntryHour";
    FileWrite(file_handle, header);
 
-   // Request trade history
    if(!HistorySelect(0, TimeCurrent()))
      {
       Print("StrategyDNA Error: Could not request history: ", GetLastError());
@@ -33,18 +96,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
      }
 
    int total_deals = HistoryDealsTotal();
-
-   // It is safe to create indicator handles in OnDeinit during a tester run,
-   // but data might be limited. It relies on the tester's available historical bars.
-   int atr_handle = iATR(_Symbol, PERIOD_CURRENT, ATR_Period);
-   int stddev_handle = iStdDev(_Symbol, PERIOD_CURRENT, StdDev_Period, 0, MODE_SMA, PRICE_CLOSE);
-
-   if(atr_handle == INVALID_HANDLE || stddev_handle == INVALID_HANDLE)
-     {
-      Print("StrategyDNA Error: Could not create indicator handles.");
-      FileClose(file_handle);
-      return;
-     }
 
    // Pass 1: Gather all unique Position IDs from deals
    long pos_ids[];
@@ -56,11 +107,10 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
       if(deal_ticket == 0) continue;
 
       long deal_entry = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
-      if(deal_entry != DEAL_ENTRY_OUT) continue; // We only care about positions that have been closed
+      if(deal_entry != DEAL_ENTRY_OUT) continue;
 
       long pos_id = HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
 
-      // Check if already in array
       bool exists = false;
       for(int k = 0; k < pos_count; k++)
         {
@@ -84,7 +134,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
      {
       long pos_id = pos_ids[i];
 
-      // Select the history of the position
       if(!HistorySelectByPosition(pos_id)) continue;
 
       double total_commission = 0;
@@ -103,7 +152,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
 
       int deals_in_pos = HistoryDealsTotal();
 
-      // Loop through deals in this specific position
       for(int j = 0; j < deals_in_pos; j++)
         {
          ulong d_ticket = HistoryDealGetTicket(j);
@@ -121,7 +169,7 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
 
          if(d_entry == DEAL_ENTRY_IN)
            {
-            if(entry_deal_ticket == 0) // Take the first entry
+            if(entry_deal_ticket == 0)
               {
                entry_deal_ticket = d_ticket;
                entry_time = (datetime)HistoryDealGetInteger(d_ticket, DEAL_TIME);
@@ -131,7 +179,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
            }
          else if(d_entry == DEAL_ENTRY_OUT || d_entry == DEAL_ENTRY_INOUT)
            {
-            // Update the exit details (in case of partial closes, takes the last one)
             exit_deal_ticket = d_ticket;
             exit_time = (datetime)HistoryDealGetInteger(d_ticket, DEAL_TIME);
             exit_price = HistoryDealGetDouble(d_ticket, DEAL_PRICE);
@@ -140,7 +187,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
 
       if(entry_deal_ticket == 0 || exit_deal_ticket == 0) continue;
 
-      // Calculate Net PnL to be accurate for Integrity Score
       double net_pnl = base_pnl + total_commission + total_swap;
 
       long deal_type = HistoryDealGetInteger(exit_deal_ticket, DEAL_TYPE);
@@ -149,7 +195,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
       double mae = 0.0;
       double mfe = 0.0;
 
-      // Calculate MAE and MFE using historical rates between entry and exit
       double high_rates[], low_rates[];
       int copied_high = CopyHigh(_Symbol, PERIOD_M1, entry_time, exit_time, high_rates);
       int copied_low = CopyLow(_Symbol, PERIOD_M1, entry_time, exit_time, low_rates);
@@ -176,25 +221,14 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
 
       long duration_sec = exit_time - entry_time;
 
-      // Indicator Context at Entry Time
-      double atr_array[1];
-      double stddev_array[1];
-
-      int shift = iBarShift(_Symbol, PERIOD_CURRENT, entry_time);
-      double atr_val = 0.0;
-      double stddev_val = 0.0;
-
-      if(shift >= 0)
-        {
-         if(CopyBuffer(atr_handle, 0, shift, 1, atr_array) > 0) atr_val = atr_array[0];
-         if(CopyBuffer(stddev_handle, 0, shift, 1, stddev_array) > 0) stddev_val = stddev_array[0];
-        }
+      // Calculate Indicators Manually (OnDeinit Safe)
+      double atr_val = CalculateATR(_Symbol, PERIOD_CURRENT, entry_time, ATR_Period);
+      double stddev_val = CalculateStdDev(_Symbol, PERIOD_CURRENT, entry_time, StdDev_Period);
 
       MqlDateTime time_struct;
       TimeToStruct(entry_time, time_struct);
       int entry_hour = time_struct.hour;
 
-      // Formatting CSV Row
       string row = StringFormat("%I64u,%s,%s,%s,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d",
                                 pos_id,
                                 _Symbol,
@@ -218,8 +252,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
      }
 
    FileClose(file_handle);
-   IndicatorRelease(atr_handle);
-   IndicatorRelease(stddev_handle);
-   Print("StrategyDNA: Data extraction complete. Saved to: ", FileName);
+   Print("StrategyDNA: Data extraction complete. Saved to Tester/Files/: ", FileName);
   }
 //+------------------------------------------------------------------+

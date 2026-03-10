@@ -8,7 +8,7 @@
 #property script_show_inputs
 
 //--- Inputs
-input string   FileName = "trade_results.csv";   // Output CSV File Name
+input string   BaseFileName = "live_results";    // Output CSV Base Name
 input int      ATR_Period = 14;                  // ATR Period
 input int      StdDev_Period = 20;               // StdDev Period
 
@@ -17,11 +17,20 @@ input int      StdDev_Period = 20;               // StdDev Period
 //+------------------------------------------------------------------+
 void OnStart()
   {
-   // Open or create the CSV file
-   int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_COMMON, ",");
+   Print("StrategyDNA: Live Extraction started...");
+
+   // Versioning: Append YYYYMMDD_HHMMSS to the filename
+   string timestamp = TimeToString(TimeLocal(), TIME_DATE|TIME_SECONDS);
+   StringReplace(timestamp, ".", "");
+   StringReplace(timestamp, ":", "");
+   StringReplace(timestamp, " ", "_");
+   string FinalFileName = BaseFileName + "_" + timestamp + ".csv";
+
+   // Open or create the CSV file in MQL5/Files/
+   int file_handle = FileOpen(FinalFileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
    if(file_handle == INVALID_HANDLE)
      {
-      Print("Error opening file: ", GetLastError());
+      Print("StrategyDNA Error: Could not open file: ", FinalFileName, " | Error Code: ", GetLastError());
       return;
      }
 
@@ -228,6 +237,8 @@ void OnStart()
    FileClose(file_handle);
    IndicatorRelease(atr_handle);
    IndicatorRelease(stddev_handle);
-   Print("Data extraction complete. Saved to Terminal/Common/Files/ : ", FileName);
+   Print("StrategyDNA: SUCCESS! Live data extraction complete.");
+   Print("StrategyDNA: You can find your file at: MQL5/Files/", FinalFileName);
+   Print("StrategyDNA: (In MetaTrader 5, click File -> Open Data Folder -> MQL5 -> Files)");
   }
 //+------------------------------------------------------------------+

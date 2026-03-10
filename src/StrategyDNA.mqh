@@ -76,12 +76,22 @@ double CalculateStdDev(string symbol, ENUM_TIMEFRAMES timeframe, datetime entry_
 //+------------------------------------------------------------------+
 //| Call this function inside your Expert Advisor's OnDeinit()       |
 //+------------------------------------------------------------------+
-void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14, int StdDev_Period=20)
+void ExportStrategyDNA(string BaseFileName="backtest", int ATR_Period=14, int StdDev_Period=20)
   {
-   int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_COMMON, ",");
+   Print("StrategyDNA: Initialization started in OnDeinit(). Generating report...");
+
+   // Versioning: Append YYYYMMDD_HHMMSS to the filename
+   string timestamp = TimeToString(TimeLocal(), TIME_DATE|TIME_SECONDS);
+   StringReplace(timestamp, ".", "");
+   StringReplace(timestamp, ":", "");
+   StringReplace(timestamp, " ", "_");
+   string FinalFileName = BaseFileName + "_" + timestamp + ".csv";
+
+   // We do NOT use FILE_COMMON here. It will save to Tester/Files/ during a backtest.
+   int file_handle = FileOpen(FinalFileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
    if(file_handle == INVALID_HANDLE)
      {
-      Print("StrategyDNA Error: Could not open file: ", GetLastError());
+      Print("StrategyDNA Error: Could not open file: ", FinalFileName, " | Error Code: ", GetLastError());
       return;
      }
 
@@ -94,6 +104,8 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
       FileClose(file_handle);
       return;
      }
+
+   Print("StrategyDNA: Analyzing history deals...");
 
    int total_deals = HistoryDealsTotal();
 
@@ -252,6 +264,8 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
      }
 
    FileClose(file_handle);
-   Print("StrategyDNA: Data extraction complete. Saved to Terminal/Common/Files/: ", FileName);
+   Print("StrategyDNA: SUCCESS! Backtest data extraction complete.");
+   Print("StrategyDNA: You can find your file at: Tester/Files/", FinalFileName);
+   Print("StrategyDNA: (Right-click your Strategy Tester Journal, select 'Open', then navigate to the 'Files' folder)");
   }
 //+------------------------------------------------------------------+

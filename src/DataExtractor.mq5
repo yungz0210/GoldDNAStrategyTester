@@ -18,7 +18,7 @@ input int      StdDev_Period = 20;               // StdDev Period
 void OnStart()
   {
    // Open or create the CSV file
-   int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
+   int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_COMMON, ",");
    if(file_handle == INVALID_HANDLE)
      {
       Print("Error opening file: ", GetLastError());
@@ -228,6 +228,6 @@ void OnStart()
    FileClose(file_handle);
    IndicatorRelease(atr_handle);
    IndicatorRelease(stddev_handle);
-   Print("Data extraction complete. Saved to MQL5/Files/ : ", FileName);
+   Print("Data extraction complete. Saved to Terminal/Common/Files/ : ", FileName);
   }
 //+------------------------------------------------------------------+

@@ -78,7 +78,7 @@ double CalculateStdDev(string symbol, ENUM_TIMEFRAMES timeframe, datetime entry_
 //+------------------------------------------------------------------+
 void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14, int StdDev_Period=20)
   {
-   int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
+   int file_handle = FileOpen(FileName, FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_COMMON, ",");
    if(file_handle == INVALID_HANDLE)
      {
       Print("StrategyDNA Error: Could not open file: ", GetLastError());
@@ -252,6 +252,6 @@ void ExportStrategyDNA(string FileName="backtest_results.csv", int ATR_Period=14
      }
 
    FileClose(file_handle);
-   Print("StrategyDNA: Data extraction complete. Saved to Tester/Files/: ", FileName);
+   Print("StrategyDNA: Data extraction complete. Saved to Terminal/Common/Files/: ", FileName);
   }
 //+------------------------------------------------------------------+

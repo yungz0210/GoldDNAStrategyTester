@@ -87,8 +87,9 @@ void ExportStrategyDNA(string BaseFileName="backtest", int ATR_Period=14, int St
    StringReplace(timestamp, " ", "_");
    string FinalFileName = BaseFileName + "_" + timestamp + ".csv";
 
-   // We do NOT use FILE_COMMON here. It will save to Tester/Files/ during a backtest.
-   int file_handle = FileOpen(FinalFileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
+   // We USE FILE_COMMON here to break out of the hidden Tester/Agent-XXXX/MQL5/Files/ directory
+   // It will save directly to the globally accessible Terminal/Common/Files/ folder
+   int file_handle = FileOpen(FinalFileName, FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_COMMON, ",");
    if(file_handle == INVALID_HANDLE)
      {
       Print("StrategyDNA Error: Could not open file: ", FinalFileName, " | Error Code: ", GetLastError());
@@ -265,7 +266,7 @@ void ExportStrategyDNA(string BaseFileName="backtest", int ATR_Period=14, int St
 
    FileClose(file_handle);
    Print("StrategyDNA: SUCCESS! Backtest data extraction complete.");
-   Print("StrategyDNA: You can find your file at: Tester/Files/", FinalFileName);
-   Print("StrategyDNA: (Right-click your Strategy Tester Journal, select 'Open', then navigate to the 'Files' folder)");
+   Print("StrategyDNA: You can find your file at: Terminal/Common/Files/", FinalFileName);
+   Print("StrategyDNA: (In MT5, click File -> Open Data Folder -> Up one level to MetaQuotes -> Terminal -> Common -> Files)");
   }
 //+------------------------------------------------------------------+

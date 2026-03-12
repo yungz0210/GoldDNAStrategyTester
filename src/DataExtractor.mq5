@@ -26,8 +26,8 @@ void OnStart()
    StringReplace(timestamp, " ", "_");
    string FinalFileName = BaseFileName + "_" + timestamp + ".csv";
 
-   // Open or create the CSV file in MQL5/Files/
-   int file_handle = FileOpen(FinalFileName, FILE_CSV|FILE_WRITE|FILE_ANSI, ",");
+   // Open or create the CSV file in the shared Terminal/Common/Files/ directory
+   int file_handle = FileOpen(FinalFileName, FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_COMMON, ",");
    if(file_handle == INVALID_HANDLE)
      {
       Print("StrategyDNA Error: Could not open file: ", FinalFileName, " | Error Code: ", GetLastError());
@@ -238,7 +238,7 @@ void OnStart()
    IndicatorRelease(atr_handle);
    IndicatorRelease(stddev_handle);
    Print("StrategyDNA: SUCCESS! Live data extraction complete.");
-   Print("StrategyDNA: You can find your file at: MQL5/Files/", FinalFileName);
-   Print("StrategyDNA: (In MetaTrader 5, click File -> Open Data Folder -> MQL5 -> Files)");
+   Print("StrategyDNA: You can find your file at: Terminal/Common/Files/", FinalFileName);
+   Print("StrategyDNA: (In MT5, click File -> Open Data Folder -> Up one level to MetaQuotes -> Terminal -> Common -> Files)");
   }
 //+------------------------------------------------------------------+

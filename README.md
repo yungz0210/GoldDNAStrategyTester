@@ -43,13 +43,16 @@ Because MetaTrader 5 does not allow you to drag scripts onto a Strategy Tester V
    ```
 4. Compile your EA and run a Strategy Tester backtest.
 5. When the backtest finishes, look at your Strategy Tester's **"Journal"** tab. You will see a print message containing the exact file name (e.g., `backtest_20231015_143022.csv`).
-6. **To find the file:** Right-click anywhere inside the "Journal" tab, select **"Open"**, and navigate to the `Files/` directory.
+6. **To find the file:** The file is saved in your globally shared **Terminal/Common/Files** directory.
+   - In MT5, click `File` -> `Open Data Folder`.
+   - Go UP one folder level into the `MetaQuotes` folder.
+   - Open `Terminal` -> `Common` -> `Files`.
 
 #### 2. How to get the Live Trading Data (`DataExtractor.mq5`)
 1. Place `src/DataExtractor.mq5` into your MetaTrader 5 `MQL5/Scripts/` folder and compile it.
 2. Open your Live MT5 account and drag the `DataExtractor` script onto any chart.
 3. Look at your MT5 **"Toolbox -> Experts"** tab to see the success message.
-4. **To find the file:** Click `File` -> `Open Data Folder` -> open the `MQL5/Files/` folder. You will find your versioned CSV (e.g., `live_results_20231015_143022.csv`).
+4. **To find the file:** The file is saved in the exact same **Terminal/Common/Files** directory as your backtest files. (See instructions above).
 
 ## Future Phases
 - Full Dockerization for SaaS Deployment

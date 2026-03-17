@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from engine import calculate_integrity_score, analyze_regimes, calculate_session_metrics, run_prop_firm_monte_carlo
+from ml_engine import load_and_localize_mt5_data, fetch_and_engineer_macro_data, train_and_predict_regimes, apply_ml_filter
 
 st.set_page_config(page_title="Strategy DNA Tester", layout="wide")
 st.title("The Strategy DNA Tester")
@@ -31,7 +32,7 @@ if has_backtest or has_live:
     if (has_backtest and not valid_bt) or (has_live and not valid_live):
         st.error("Error: Uploaded CSVs must contain a 'PnL' column. Please use the MQL5 DataExtractor script.")
     else:
-        tab1, tab2, tab3 = st.tabs(["Integrity Score", "BI & Regime Analysis", "Prop-Firm Monte Carlo"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Integrity Score", "BI & Regime Analysis", "Prop-Firm Monte Carlo", "ML Strategy Filter"])
 
         # Determine the primary dataframe for Regime and Monte Carlo analysis
         # If both are uploaded, let the user choose which one to analyze for Tabs 2 & 3.
@@ -204,3 +205,87 @@ if has_backtest or has_live:
                             fig_mc.add_hline(y=starting_balance * (1 - total_dd_pct), line_dash="dash", line_color="red", annotation_text="Max Total DD")
                             fig_mc.update_layout(title="Sample Monte Carlo Equity Paths", xaxis_title="Trades", yaxis_title="Account Balance ($)")
                             st.plotly_chart(fig_mc, use_container_width=True)
+
+        # --- TAB 4: ML STRATEGY FILTER ---
+        with tab4:
+            st.header("Machine Learning Regime Classifier")
+            st.markdown("Trains a Walk-Forward Random Forest model to predict Daily regimes (Trending vs Choppy) using yfinance macro data, and simulates filtering out the choppy days.")
+
+            # To avoid reprocessing the uploaded CSV, we re-use the file buffer but parse it with our ml_engine
+            # Ensure we reset the buffer pointer
+            file_to_use = live_file if has_live else backtest_file
+
+            if file_to_use is not None:
+                ml_symbol = st.text_input("yfinance Symbol (e.g. GC=F for Gold, EURUSD=X for Forex)", "GC=F")
+
+                if st.button("Run ML Macro-Filter Analysis", type="primary"):
+                    with st.spinner("1. Parsing and Localizing MT5 Data to NY Time..."):
+                        file_to_use.seek(0)
+                        df_mt5_ml = load_and_localize_mt5_data(file_to_use)
+
+                    if df_mt5_ml.empty:
+                        st.error("Failed to load or localize MT5 data. Ensure EntryTime column exists.")
+                    else:
+                        with st.spinner(f"2. Fetching & Engineering {ml_symbol} Macro Data..."):
+                            start_dt = str(df_mt5_ml['TradeDate_NY'].min())
+                            end_dt = str(df_mt5_ml['TradeDate_NY'].max() + pd.Timedelta(days=1))
+                            df_macro = fetch_and_engineer_macro_data(ml_symbol, start_dt, end_dt)
+
+                        if df_macro.empty:
+                            st.error(f"Failed to fetch yfinance data for {ml_symbol}. Check symbol and date range.")
+                        else:
+                            with st.spinner("3. Training TimeSeriesSplit Random Forest Model..."):
+                                df_macro_pred = train_and_predict_regimes(df_macro)
+
+                            with st.spinner("4. Merging Predictions & Simulating Equity Curve..."):
+                                fusion_results = apply_ml_filter(df_mt5_ml, df_macro_pred)
+
+                            st.success("ML Pipeline Complete!")
+
+                            base_metrics = fusion_results['Baseline_Metrics']
+                            filt_metrics = fusion_results['Filtered_Metrics']
+
+                            # Layout Comparative Metrics
+                            st.subheader("Performance Comparison")
+                            mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+
+                            def render_comparison(col, title, base_val, filt_val, is_pct=False, is_currency=False):
+                                suffix = "%" if is_pct else ""
+                                prefix = "$" if is_currency else ""
+
+                                delta = filt_val - base_val
+                                if is_pct or is_currency or isinstance(base_val, float):
+                                    b_str = f"{prefix}{base_val:.2f}{suffix}"
+                                    f_str = f"{prefix}{filt_val:.2f}{suffix}"
+                                    d_str = f"{delta:.2f}{suffix}"
+                                else:
+                                    b_str = f"{base_val}{suffix}"
+                                    f_str = f"{filt_val}{suffix}"
+                                    d_str = f"{delta}{suffix}"
+
+                                col.metric(title, f_str, delta=d_str)
+                                col.markdown(f"<small>Original: {b_str}</small>", unsafe_allow_html=True)
+
+                            render_comparison(mc1, "Total Trades", base_metrics['Total Trades'], filt_metrics.get('Total Trades', 0))
+                            render_comparison(mc2, "Win Rate", base_metrics['Win Rate (%)'], filt_metrics.get('Win Rate (%)', 0), is_pct=True)
+
+                            # Handle infinite profit factors
+                            bppf = base_metrics['Profit Factor'] if base_metrics['Profit Factor'] != float('inf') else 99.9
+                            fppf = filt_metrics.get('Profit Factor', 0) if filt_metrics.get('Profit Factor', 0) != float('inf') else 99.9
+                            render_comparison(mc3, "Profit Factor", bppf, fppf)
+
+                            render_comparison(mc4, "Net Profit", base_metrics['Net Profit'], filt_metrics.get('Net Profit', 0), is_currency=True)
+                            render_comparison(mc5, "Max Drawdown", base_metrics['Max Drawdown'], filt_metrics.get('Max Drawdown', 0), is_currency=True)
+
+                            st.subheader("Equity Curve Simulation")
+                            fig_eq = go.Figure()
+                            fig_eq.add_trace(go.Scatter(y=fusion_results['Equity_Original'], mode='lines', name='Original MQL5 Trades', line=dict(color='gray', width=2)))
+                            fig_eq.add_trace(go.Scatter(y=fusion_results['Equity_Filtered'], mode='lines', name='ML-Filtered Trades', line=dict(color='green', width=3)))
+                            fig_eq.update_layout(title="Original vs. ML-Filtered Equity Curve", xaxis_title="Trade Number", yaxis_title="Cumulative Net PnL", hovermode='x unified')
+
+                            st.plotly_chart(fig_eq, use_container_width=True)
+
+                            st.markdown("### How It Works")
+                            st.markdown("- **Look-Ahead Bias Prevented:** The model predicts *Today's* environment using *Yesterday's* Daily Close, ADX, ATR, and SMA distance.")
+                            st.markdown("- **Walk-Forward Validation:** Trained using `TimeSeriesSplit` (5 folds) to ensure chronological accuracy.")
+                            st.markdown(f"- **Filtered Output:** Out of {base_metrics['Total Trades']} original trades, {base_metrics['Total Trades'] - filt_metrics.get('Total Trades', 0)} were executed on 'Choppy' days and safely filtered out.")

@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import TimeSeriesSplit
 
 # --- HELPER FUNCTIONS: Native Indicators (To Avoid pandas-ta / Python 3.14 Crash) ---
 
@@ -213,6 +215,15 @@ def fetch_and_engineer_macro_data(symbol: str, start_date: str, end_date: str) -
         0  # Choppy
     )
 
+    # CRITICAL: Prevent Look-Ahead Bias
+    # We must predict TODAY's label using YESTERDAY'S features.
+    # Therefore, shift the features forward by 1 day.
+    feature_cols = ['ADX_14', 'ATR_14', 'SMA_200_Dist_Pct', 'Daily_Return_Pct']
+    for col in feature_cols:
+        df_yf[f'{col}_Shift1'] = df_yf[col].shift(1)
+
+    df_yf = df_yf.dropna(subset=[f'{col}_Shift1' for col in feature_cols])
+
     # Filter out the buffer period to only return the requested date range
     start_dt = pd.to_datetime(start_date).date()
     end_dt = pd.to_datetime(end_date).date()
@@ -220,3 +231,105 @@ def fetch_and_engineer_macro_data(symbol: str, start_date: str, end_date: str) -
     df_final = df_yf[(df_yf['Date'] >= start_dt) & (df_yf['Date'] <= end_dt)].copy()
 
     return df_final
+
+# --- PHASE 3: The Regime Classifier Model ---
+
+def train_and_predict_regimes(df_macro: pd.DataFrame) -> pd.DataFrame:
+    """
+    Trains a Random Forest Classifier using TimeSeriesSplit (Walk-Forward).
+    Predicts the Target_Label for the dataset.
+    """
+    if df_macro.empty:
+        return df_macro
+
+    features = ['ADX_14_Shift1', 'ATR_14_Shift1', 'SMA_200_Dist_Pct_Shift1', 'Daily_Return_Pct_Shift1']
+    X = df_macro[features].values
+    y = df_macro['Target_Label'].values
+
+    # Initialize the model and cross-validator
+    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+
+    # Safely handle very small datasets by adjusting the number of splits
+    n_samples = len(y)
+    n_splits = 5 if n_samples >= 6 else max(1, n_samples - 1)
+
+    if n_splits < 1:
+        # If we have 1 or 0 samples, we can't do TimeSeriesSplit at all
+        df_macro['ML_Prediction'] = 0
+        return df_macro
+
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+
+    predictions = np.zeros(len(y))
+    predictions[:] = np.nan # Use NaN to mark unpredicted rows (like the initial training buffer)
+
+    # Perform walk-forward training/prediction
+    for train_index, test_index in tscv.split(X):
+        X_train, X_test = X[train_index], X[test_index]
+        y_train, y_test = y[train_index], y[test_index]
+
+        # Only train if we have both classes in the training set
+        if len(np.unique(y_train)) > 1:
+            model.fit(X_train, y_train)
+            pred = model.predict(X_test)
+            predictions[test_index] = pred
+        else:
+            # If a fold lacks variation, fallback to predicting 0 (Choppy/Filter On)
+            predictions[test_index] = 0
+
+    df_macro['ML_Prediction'] = predictions
+
+    # For the earliest data points that couldn't be predicted (Fold 0 training set),
+    # we conservatively default to 0 (Choppy) to simulate the model being "offline" initially.
+    df_macro['ML_Prediction'] = df_macro['ML_Prediction'].fillna(0)
+
+    return df_macro
+
+
+# --- PHASE 4: Data Fusion & Filter Logic ---
+
+def apply_ml_filter(df_mt5: pd.DataFrame, df_macro_predictions: pd.DataFrame) -> dict:
+    """
+    Merges MT5 trades with ML predictions.
+    Generates a filtered Equity Curve where trades on 'Choppy' (Prediction == 0) days are skipped.
+    """
+    if df_mt5.empty or df_macro_predictions.empty:
+        return {}
+
+    # Merge the DataFrames based on the localized NY Date
+    # We use a left join to keep all MT5 trades. If a day has no macro data (e.g. weekend),
+    # the prediction will be NaN.
+    df_merged = df_mt5.merge(
+        df_macro_predictions[['Date', 'ML_Prediction']],
+        left_on='TradeDate_NY',
+        right_on='Date',
+        how='left'
+    )
+
+    # For weekends/holidays where yfinance has no data, carry forward the Friday prediction (ffill)
+    # We sort by EntryTime just in case.
+    df_merged = df_merged.sort_values('EntryTime')
+    df_merged['ML_Prediction'] = df_merged['ML_Prediction'].ffill()
+
+    # Default to 0 (Filter out) if still NaN
+    df_merged['ML_Prediction'] = df_merged['ML_Prediction'].fillna(0)
+
+    # Create the Filtered Dataset
+    # We KEEP trades where ML_Prediction == 1 (Trending)
+    df_filtered = df_merged[df_merged['ML_Prediction'] == 1].copy()
+
+    # Calculate Comparative Metrics
+    baseline_metrics = calculate_baseline_metrics(df_mt5)
+    filtered_metrics = calculate_baseline_metrics(df_filtered)
+
+    # Generate Equity Curves
+    eq_original = [0.0] + df_mt5['NetPnL'].cumsum().tolist()
+    eq_filtered = [0.0] + df_filtered['NetPnL'].cumsum().tolist()
+
+    return {
+        'Baseline_Metrics': baseline_metrics,
+        'Filtered_Metrics': filtered_metrics,
+        'Equity_Original': eq_original,
+        'Equity_Filtered': eq_filtered,
+        'Filtered_DataFrame': df_filtered
+    }
